@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "talosprotocol-a2a"
+version = "1.0.0"
+description = "Universal Agent-to-Agent (A2A) v1 specification engine with In-Memory and Temporal drivers, blocking/streaming execution, and multimodal voice/video support."
+readme = "README.md"
+authors = [
+    { name = "Talos Protocol Authors", email = "dev@talosprotocol.com" }
+]
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+temporal = [
+    "temporalio>=1.5.0",
+]
+multimodal = [
+    "numpy>=1.24.0",
+    "pillow>=10.0.0",
+]
+all = [
+    "temporalio>=1.5.0",
+    "numpy>=1.24.0",
+    "pillow>=10.0.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "mypy>=1.9.0",
+    "ruff>=0.3.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/a2a"]

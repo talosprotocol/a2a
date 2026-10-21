@@ -175,6 +175,9 @@ class Message:
                 texts.append(p.text)
         return " ".join(texts).strip()
 
+    def get_text_content(self) -> str:
+        return self.get_text()
+
     def get_audio_parts(self) -> list[AudioPart]:
         return [p for p in self.parts if isinstance(p, AudioPart)]
 

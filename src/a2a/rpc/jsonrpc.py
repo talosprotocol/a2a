@@ -18,6 +18,14 @@ ALLOWED_A2A_METHODS = {
     "ListTasks",
     "GetExtendedAgentCard",
     "agent/getAuthenticatedExtendedCard",
+    "tasks/send",
+    "tasks.send",
+    "tasks/get",
+    "tasks.get",
+    "tasks/cancel",
+    "tasks.cancel",
+    "tasks/list",
+    "tasks.list",
 }
 
 
@@ -82,7 +90,7 @@ class A2AJsonRpcDispatcher:
                 card = self.agent_card_provider()
                 return {"jsonrpc": "2.0", "id": req_id, "result": card}
 
-            elif method == "SendMessage":
+            elif method in {"SendMessage", "tasks/send", "tasks.send"}:
                 msg_data = params.get("message")
                 if not msg_data or not isinstance(msg_data, dict):
                     return {
@@ -123,8 +131,8 @@ class A2AJsonRpcDispatcher:
                         },
                     }
 
-            elif method == "GetTask":
-                task_id = params.get("taskId")
+            elif method in {"GetTask", "tasks/get", "tasks.get"}:
+                task_id = params.get("taskId") or params.get("id")
                 if not task_id:
                     return {
                         "jsonrpc": "2.0",
@@ -132,7 +140,7 @@ class A2AJsonRpcDispatcher:
                         "error": {
                             "code": -32602,
                             "message": "Invalid params",
-                            "data": {"details": "taskId required"},
+                            "data": {"details": "taskId or id required"},
                         },
                     }
                 task = self.runner.get_task(str(task_id))
@@ -148,8 +156,8 @@ class A2AJsonRpcDispatcher:
                     }
                 return {"jsonrpc": "2.0", "id": req_id, "result": {"task": task.to_dict()}}
 
-            elif method == "CancelTask":
-                task_id = params.get("taskId")
+            elif method in {"CancelTask", "tasks/cancel", "tasks.cancel"}:
+                task_id = params.get("taskId") or params.get("id")
                 reason = params.get("reason", "Canceled via A2A CancelTask")
                 if not task_id:
                     return {
@@ -168,7 +176,7 @@ class A2AJsonRpcDispatcher:
                     "result": {"taskId": task_id, "canceled": ok},
                 }
 
-            elif method == "ListTasks":
+            elif method in {"ListTasks", "tasks/list", "tasks.list"}:
                 context_id = params.get("contextId")
                 state_str = params.get("state")
                 state = TaskState.from_str(state_str) if state_str else None

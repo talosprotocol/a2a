@@ -4,7 +4,11 @@ import logging
 from datetime import timedelta
 from typing import Any
 
-from .activities import execute_a2a_step
+from .activities import (
+    execute_a2a_step,
+    search_startups_activity,
+    synthesize_outreach_activity,
+)
 from .contracts import ActivityStepInput, WorkflowTaskInput
 
 LOGGER = logging.getLogger(__name__)
@@ -121,3 +125,77 @@ class A2ATaskWorkflow:
     @workflow.update
     def fetch_recent_events(self, from_index: int) -> list[dict[str, Any]]:
         return self.events[from_index:]
+
+
+@workflow.defn
+class A2AOutreachWorkflow:
+    """
+    Durable multi-step agent workflow that searches startups in Qdrant and synthesizes
+    tailored Talos Protocol partner outreach campaigns using local DeepSeek-R1.
+    """
+    def __init__(self) -> None:
+        self.state: str = "TASK_STATE_SUBMITTED"
+        self.status_message: str = "Campaign workflow initialized"
+        self.startups: list[dict[str, Any]] = []
+        self.campaign_output: str = ""
+        self.canceled: bool = False
+
+    @workflow.run
+    async def run(self, target_focus: str, limit: int = 3) -> dict[str, Any]:
+        self.state = "TASK_STATE_WORKING"
+        self.status_message = f"Searching Qdrant startups for focus '{target_focus}'..."
+
+        retry_policy = RetryPolicy(
+            initial_interval=timedelta(seconds=2),
+            maximum_interval=timedelta(seconds=30),
+            maximum_attempts=3,
+        )
+
+        # 1. Search Startups Activity
+        self.startups = await workflow.execute_activity(
+            search_startups_activity,
+            target_focus,
+            limit,
+            start_to_close_timeout=timedelta(seconds=60),
+            retry_policy=retry_policy,
+        )
+
+        if self.canceled:
+            self.state = "TASK_STATE_CANCELED"
+            return {"state": self.state, "output": "Workflow canceled", "startups": []}
+
+        self.status_message = f"Synthesizing DeepSeek-R1 outreach for {len(self.startups)} startups..."
+
+        # 2. Synthesis Activity
+        self.campaign_output = await workflow.execute_activity(
+            synthesize_outreach_activity,
+            self.startups,
+            target_focus,
+            start_to_close_timeout=timedelta(seconds=120),
+            retry_policy=retry_policy,
+        )
+
+        self.state = "TASK_STATE_COMPLETED"
+        self.status_message = "Outreach campaign generated successfully"
+
+        return {
+            "state": self.state,
+            "output": self.campaign_output,
+            "startups": self.startups,
+            "target_focus": target_focus,
+        }
+
+    @workflow.query
+    def get_campaign_state(self) -> dict[str, Any]:
+        return {
+            "state": self.state,
+            "status_message": self.status_message,
+            "startups": self.startups,
+            "output": self.campaign_output,
+            "canceled": self.canceled,
+        }
+
+    @workflow.signal
+    def cancel(self, reason: str = "Canceled by user") -> None:
+        self.canceled = True
+        self.status_message = reason

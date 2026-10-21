@@ -72,3 +72,23 @@ async def test_temporal_task_runner_with_mock_client():
     )
     assert submit_task.status.state == TaskState.WORKING
     assert mock_client.start_workflow.called
+
+
+@pytest.mark.asyncio
+async def test_outreach_activities_fallback():
+    from a2a.runners.temporal.activities import search_startups_activity, synthesize_outreach_activity
+    from a2a.runners.temporal.workflows import A2AOutreachWorkflow
+
+    startups = await search_startups_activity("autonomous multi-agent", limit=2)
+    assert len(startups) > 0
+    assert "startup_name" in startups[0]
+
+    pitch = await synthesize_outreach_activity(startups, "autonomous multi-agent")
+    assert "Talos Protocol" in pitch
+
+    wf = A2AOutreachWorkflow()
+    assert wf.state == "TASK_STATE_SUBMITTED"
+    wf.cancel("Stop campaign")
+    assert wf.canceled is True
+    assert wf.get_campaign_state()["canceled"] is True
+

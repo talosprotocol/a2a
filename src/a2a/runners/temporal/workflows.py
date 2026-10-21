@@ -6,7 +6,9 @@ from typing import Any
 
 from .activities import (
     execute_a2a_step,
+    notify_telegram_digest_activity,
     search_startups_activity,
+    sync_lounge_messages_activity,
     synthesize_outreach_activity,
 )
 from .contracts import ActivityStepInput, WorkflowTaskInput
@@ -197,3 +199,52 @@ class A2AOutreachWorkflow:
     def cancel(self, reason: str = "Canceled by user") -> None:
         self.canceled = True
         self.status_message = reason
+
+
+@workflow.defn
+class LoungeSyncWorkflow:
+    """
+    Recurring or on-demand workflow that syncs WhatsApp AI Founders Lounge messages,
+    verifies startup profiles in Qdrant, and sends a digest to Telegram.
+    """
+    def __init__(self) -> None:
+        self.state: str = "TASK_STATE_SUBMITTED"
+        self.sync_result: dict[str, Any] = {}
+
+    @workflow.run
+    async def run(self, openwa_url: str = "http://192.168.1.229:8081", notify_telegram: bool = True) -> dict[str, Any]:
+        self.state = "TASK_STATE_WORKING"
+        retry_policy = RetryPolicy(
+            initial_interval=timedelta(seconds=5),
+            maximum_attempts=2,
+        )
+
+        # 1. Sync messages and verify index
+        self.sync_result = await workflow.execute_activity(
+            sync_lounge_messages_activity,
+            args=[openwa_url, 50],
+            start_to_close_timeout=timedelta(seconds=60),
+            retry_policy=retry_policy,
+        )
+
+        # 2. Optional Telegram notification
+        if notify_telegram:
+            pts = self.sync_result.get("points_count", 0)
+            digest = (
+                f"🔄 *Talos Lounge Periodic Sync Completed*\n\n"
+                f"• **Index Status:** `{pts}` startups indexed in Qdrant vector database\n"
+                f"• **Target Queue:** `a2a-task-queue` (Fedora Worker Fleet)\n"
+                f"• **Status:** Operational"
+            )
+            await workflow.execute_activity(
+                notify_telegram_digest_activity,
+                args=[digest],
+                start_to_close_timeout=timedelta(seconds=15),
+            )
+
+        self.state = "TASK_STATE_COMPLETED"
+        return {
+            "state": self.state,
+            "sync_result": self.sync_result,
+        }
+

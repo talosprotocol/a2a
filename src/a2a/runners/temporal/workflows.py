@@ -154,8 +154,7 @@ class A2AOutreachWorkflow:
         # 1. Search Startups Activity
         self.startups = await workflow.execute_activity(
             search_startups_activity,
-            target_focus,
-            limit,
+            args=[target_focus, limit],
             start_to_close_timeout=timedelta(seconds=60),
             retry_policy=retry_policy,
         )
@@ -169,8 +168,7 @@ class A2AOutreachWorkflow:
         # 2. Synthesis Activity
         self.campaign_output = await workflow.execute_activity(
             synthesize_outreach_activity,
-            self.startups,
-            target_focus,
+            args=[self.startups, target_focus],
             start_to_close_timeout=timedelta(seconds=120),
             retry_policy=retry_policy,
         )

@@ -18,6 +18,8 @@ ALLOWED_A2A_METHODS = {
     "ListTasks",
     "GetExtendedAgentCard",
     "agent/getAuthenticatedExtendedCard",
+    "agent/card",
+    "agent.card",
     "tasks/send",
     "tasks.send",
     "tasks/get",
@@ -86,8 +88,10 @@ class A2AJsonRpcDispatcher:
             }
 
         try:
-            if method in {"GetExtendedAgentCard", "agent/getAuthenticatedExtendedCard"}:
+            if method in {"GetExtendedAgentCard", "agent/getAuthenticatedExtendedCard", "agent/card", "agent.card"}:
                 card = self.agent_card_provider()
+                if hasattr(card, "to_dict"):
+                    card = card.to_dict()
                 return {"jsonrpc": "2.0", "id": req_id, "result": card}
 
             elif method in {"SendMessage", "tasks/send", "tasks.send"}:

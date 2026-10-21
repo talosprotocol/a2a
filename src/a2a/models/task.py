@@ -69,6 +69,10 @@ class Task:
     artifacts: list[Artifact] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def latest_message(self) -> Message | None:
+        return self.history[-1] if self.history else None
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,

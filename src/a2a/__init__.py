@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+from .adapters import CrewAIA2AAdapter, LangGraphA2AAdapter
+from .discovery import AgentCardRegistry
 from .models import (
+    AgentCapabilities,
+    AgentCard,
+    AgentEndpoints,
     Artifact,
     AudioPart,
     Message,
     Part,
+    Skill,
     StreamResponse,
     Task,
     TaskArtifactUpdateEvent,
@@ -43,15 +49,22 @@ __version__ = "1.0.0"
 __all__ = [
     "ALLOWED_A2A_METHODS",
     "A2AJsonRpcDispatcher",
+    "AgentCapabilities",
+    "AgentCard",
+    "AgentCardRegistry",
+    "AgentEndpoints",
     "Artifact",
     "AudioPart",
     "AudioStreamBuffer",
     "BaseTaskRunner",
     "BaseTaskStore",
+    "CrewAIA2AAdapter",
     "InMemoryTaskRunner",
     "InMemoryTaskStore",
+    "LangGraphA2AAdapter",
     "Message",
     "Part",
+    "Skill",
     "SqliteTaskStore",
     "StreamResponse",
     "Task",

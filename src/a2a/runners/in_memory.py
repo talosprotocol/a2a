@@ -126,7 +126,15 @@ class InMemoryTaskRunner(BaseTaskRunner):
         handler: TaskExecutionHandler,
         metadata: dict[str, Any] | None = None,
         task_id: str | None = None,
+        execution_timeout: float = 180.0,
     ) -> Task:
+        """Asynchronously submit task and return initial Task record.
+
+        Args:
+            execution_timeout: Hard ceiling in seconds before the background task
+                is automatically transitioned to FAILED with error code
+                ``TASK_EXECUTION_TIMEOUT``.  Defaults to 180 s.
+        """
         task_id = task_id or str(uuid.uuid4())
         self._ensure_events(task_id)
 
@@ -137,7 +145,7 @@ class InMemoryTaskRunner(BaseTaskRunner):
             metadata=metadata,
         )
 
-        bg_coro = self._run_background_task(task, handler)
+        bg_coro = self._run_background_task(task, handler, execution_timeout=execution_timeout)
         bg_task = asyncio.create_task(bg_coro)
         self._active_async_tasks[task_id] = bg_task
 
@@ -147,7 +155,12 @@ class InMemoryTaskRunner(BaseTaskRunner):
         bg_task.add_done_callback(cleanup_task)
         return task
 
-    async def _run_background_task(self, task: Task, handler: TaskExecutionHandler) -> None:
+    async def _run_background_task(
+        self,
+        task: Task,
+        handler: TaskExecutionHandler,
+        execution_timeout: float = 180.0,
+    ) -> None:
         task_id = task.id
         context_id = task.context_id
 
@@ -164,7 +177,36 @@ class InMemoryTaskRunner(BaseTaskRunner):
             return self._cancel_events[task_id].is_set()
 
         try:
-            output_text, artifacts = await handler(task, emit_status, check_cancelled)
+            try:
+                output_text, artifacts = await asyncio.wait_for(
+                    handler(task, emit_status, check_cancelled),
+                    timeout=execution_timeout,
+                )
+            except asyncio.TimeoutError:
+                LOGGER.warning(
+                    "Background task %s exceeded execution ceiling of %.1f s; marking FAILED.",
+                    task_id,
+                    execution_timeout,
+                )
+                self.store.update_status(
+                    task_id,
+                    TaskState.FAILED,
+                    message=(
+                        f"Task execution timed out: exceeded ceiling of"
+                        f" {execution_timeout} seconds."
+                    ),
+                    details={
+                        "error_code": "TASK_EXECUTION_TIMEOUT",
+                        "timeout_seconds": execution_timeout,
+                    },
+                )
+                fail_task = self.store.get_task(task_id) or task
+                fail_event = TaskStatusUpdateEvent(
+                    task_id=task_id, context_id=context_id, status=fail_task.status
+                )
+                await self._emit_stream_response(task_id, StreamResponse(status_update=fail_event))
+                return
+
             if check_cancelled():
                 term_status = self.store.update_status(
                     task_id, TaskState.CANCELED, message="Task canceled by user"
@@ -173,7 +215,6 @@ class InMemoryTaskRunner(BaseTaskRunner):
                     task_id=task_id, context_id=context_id, status=term_status
                 )
                 await self._emit_stream_response(task_id, StreamResponse(status_update=term_event))
-                self._completion_events[task_id].set()
                 return
 
             for art in artifacts:

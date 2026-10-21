@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import datetime
 import logging
 from typing import Any, Callable
 
@@ -32,11 +34,21 @@ ALLOWED_A2A_METHODS = {
 
 
 class A2AJsonRpcDispatcher:
+    # Default sync window: block up to this many seconds waiting for completion.
+    # If the task hasn't finished by then, return an async/polling response.
+    DEFAULT_SYNC_TIMEOUT: float = 10.0
+
+    # Default hard ceiling: background task is killed and marked FAILED if it
+    # hasn't completed within this many seconds.
+    DEFAULT_EXECUTION_TIMEOUT: float = 180.0
+
     def __init__(
         self,
         runner: BaseTaskRunner,
         default_handler: TaskExecutionHandler,
         agent_card_provider: Callable[[], dict[str, Any]] | None = None,
+        sync_timeout: float | None = None,
+        execution_timeout: float | None = None,
     ) -> None:
         self.runner = runner
         self.default_handler = default_handler
@@ -47,6 +59,11 @@ class A2AJsonRpcDispatcher:
                 "protocol": "a2a-v1",
                 "supportedTaskModes": ["immediate", "streaming", "wait", "get"],
             }
+        )
+        # Allow per-instance override; fall back to class-level defaults.
+        self._sync_timeout = sync_timeout if sync_timeout is not None else self.DEFAULT_SYNC_TIMEOUT
+        self._exec_timeout = (
+            execution_timeout if execution_timeout is not None else self.DEFAULT_EXECUTION_TIMEOUT
         )
 
     async def dispatch(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -111,27 +128,64 @@ class A2AJsonRpcDispatcher:
                 return_immediately = bool(config.get("returnImmediately", False))
                 context_id = message.context_id or "default"
 
+                # Per-request overrides take precedence; fall back to dispatcher defaults.
+                sync_timeout: float = float(
+                    config.get("syncTimeoutSeconds", self._sync_timeout)
+                )
+                exec_timeout: float = float(
+                    config.get("executionTimeoutSeconds", self._exec_timeout)
+                )
+
+                # Always submit to the background runner so we have a task record.
+                task = await self.runner.submit_task(
+                    context_id=context_id,
+                    message=message,
+                    handler=self.default_handler,
+                    metadata=params.get("metadata"),
+                    execution_timeout=exec_timeout,
+                )
+
+                # returnImmediately=true: skip the sync window entirely.
                 if return_immediately:
-                    task = await self.runner.submit_task(
-                        context_id=context_id,
-                        message=message,
-                        handler=self.default_handler,
-                        metadata=params.get("metadata"),
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "result": {"task": task.to_dict()},
+                    }
+
+                # Attempt to resolve within the sync window.
+                try:
+                    completed = await asyncio.wait_for(
+                        self.runner.wait_task(task.id, timeout=exec_timeout),
+                        timeout=sync_timeout,
                     )
-                    return {"jsonrpc": "2.0", "id": req_id, "result": {"task": task.to_dict()}}
-                else:
-                    task, agent_msg = await self.runner.execute_immediate(
-                        context_id=context_id,
-                        message=message,
-                        handler=self.default_handler,
-                        metadata=params.get("metadata"),
-                    )
+                    if completed is None:
+                        completed = task
+                    latest_msg = completed.latest_message
                     return {
                         "jsonrpc": "2.0",
                         "id": req_id,
                         "result": {
-                            "task": task.to_dict(),
-                            "message": agent_msg.to_dict(),
+                            "task": completed.to_dict(),
+                            "message": latest_msg.to_dict() if latest_msg else None,
+                        },
+                    }
+                except asyncio.TimeoutError:
+                    # Sync window expired — task is still running in the background.
+                    expires_at = (
+                        datetime.datetime.now(datetime.timezone.utc)
+                        + datetime.timedelta(seconds=exec_timeout)
+                    ).isoformat()
+                    working_task = self.runner.get_task(task.id) or task
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "result": {
+                            "task": working_task.to_dict(),
+                            "async": True,
+                            "pollIntervalMs": 1000,
+                            "executionTimeoutSeconds": exec_timeout,
+                            "expiresAt": expires_at,
                         },
                     }
 

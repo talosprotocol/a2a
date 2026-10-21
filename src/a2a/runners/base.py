@@ -35,8 +35,15 @@ class BaseTaskRunner(ABC):
         handler: TaskExecutionHandler,
         metadata: dict[str, Any] | None = None,
         task_id: str | None = None,
+        execution_timeout: float = 180.0,
     ) -> Task:
-        """Asynchronously submit task and return initial Task record."""
+        """Asynchronously submit task and return initial Task record.
+
+        Args:
+            execution_timeout: Hard ceiling in seconds before the background task
+                is automatically transitioned to FAILED with error code
+                ``TASK_EXECUTION_TIMEOUT``.  Defaults to 180 s.
+        """
         pass
 
     @abstractmethod
